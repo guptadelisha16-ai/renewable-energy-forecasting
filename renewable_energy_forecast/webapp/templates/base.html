@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>{% block title %}SolarWise AI{% endblock %} | Renewable Energy Forecasting</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <style>
+    :root {
+      --bg:        #0d1117;
+      --surface:   #161b22;
+      --surface2:  #21262d;
+      --border:    #30363d;
+      --text:      #e6edf3;
+      --muted:     #8b949e;
+      --solar:     #f59e0b;
+      --wind:      #3b82f6;
+      --green:     #22c55e;
+      --red:       #ef4444;
+      --purple:    #a855f7;
+      --accent:    #f59e0b;
+      --sidebar-w: 240px;
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text);
+           display: flex; min-height: 100vh; font-size: 14px; }
+
+    /* ── Sidebar ── */
+    .sidebar {
+      width: var(--sidebar-w); background: var(--surface); border-right: 1px solid var(--border);
+      display: flex; flex-direction: column; position: fixed; top: 0; left: 0; height: 100vh;
+      z-index: 100; overflow-y: auto;
+    }
+    .sidebar-logo {
+      padding: 20px 16px 16px; border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; gap: 10px;
+    }
+    .sidebar-logo .icon { font-size: 26px; }
+    .sidebar-logo .brand { font-weight: 700; font-size: 15px; line-height: 1.2; color: var(--solar); }
+    .sidebar-logo .sub   { font-size: 10px; color: var(--muted); }
+    .nav-section { padding: 12px 12px 4px; font-size: 10px; font-weight: 600;
+                   text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+    .nav-link {
+      display: flex; align-items: center; gap: 10px; padding: 9px 16px; border-radius: 6px;
+      margin: 1px 8px; color: var(--muted); text-decoration: none; font-weight: 500;
+      font-size: 13px; transition: all .15s;
+    }
+    .nav-link:hover  { background: var(--surface2); color: var(--text); }
+    .nav-link.active { background: rgba(245,158,11,.12); color: var(--solar); }
+    .nav-link .nav-icon { font-size: 16px; width: 20px; text-align: center; }
+    .sidebar-footer { margin-top: auto; padding: 16px; border-top: 1px solid var(--border);
+                      font-size: 11px; color: var(--muted); }
+
+    /* ── Main ── */
+    .main { margin-left: var(--sidebar-w); flex: 1; display: flex; flex-direction: column; }
+    .topbar {
+      background: var(--surface); border-bottom: 1px solid var(--border);
+      padding: 0 28px; height: 56px; display: flex; align-items: center;
+      justify-content: space-between; position: sticky; top: 0; z-index: 50;
+    }
+    .topbar-title { font-weight: 600; font-size: 16px; }
+    .topbar-badges { display: flex; gap: 8px; align-items: center; }
+    .badge {
+      padding: 3px 10px; border-radius: 20px; font-size: 11px; font-weight: 600;
+      display: flex; align-items: center; gap: 4px;
+    }
+    .badge-green  { background: rgba(34,197,94,.15);  color: var(--green); }
+    .badge-solar  { background: rgba(245,158,11,.15); color: var(--solar); }
+    .badge-blue   { background: rgba(59,130,246,.15); color: var(--wind); }
+    .content { padding: 28px; flex: 1; }
+
+    /* ── Cards ── */
+    .card {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+      padding: 20px; position: relative; overflow: hidden;
+    }
+    .card-title { font-size: 12px; font-weight: 600; text-transform: uppercase;
+                  letter-spacing: .06em; color: var(--muted); margin-bottom: 8px; }
+    .card-value { font-size: 28px; font-weight: 700; }
+    .card-sub   { font-size: 12px; color: var(--muted); margin-top: 3px; }
+    .card-accent { position: absolute; right: 16px; top: 50%; transform: translateY(-50%);
+                   font-size: 32px; opacity: .15; }
+
+    /* ── Grid helpers ── */
+    .grid-4 { display: grid; grid-template-columns: repeat(4,1fr); gap: 16px; }
+    .grid-3 { display: grid; grid-template-columns: repeat(3,1fr); gap: 16px; }
+    .grid-2 { display: grid; grid-template-columns: repeat(2,1fr); gap: 16px; }
+    .grid-2-1 { display: grid; grid-template-columns: 2fr 1fr; gap: 16px; }
+
+    /* ── Charts ── */
+    .chart-wrap { position: relative; width: 100%; }
+
+    /* ── Forms ── */
+    .form-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 14px; }
+    .form-group { display: flex; flex-direction: column; gap: 5px; }
+    .form-group label { font-size: 12px; font-weight: 500; color: var(--muted); }
+    .form-group input, .form-group select {
+      background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+      color: var(--text); padding: 8px 12px; font-size: 13px; font-family: inherit;
+      outline: none; transition: border-color .15s;
+    }
+    .form-group input:focus, .form-group select:focus { border-color: var(--solar); }
+
+    /* ── Buttons ── */
+    .btn {
+      padding: 9px 20px; border-radius: 6px; font-size: 13px; font-weight: 600;
+      cursor: pointer; border: none; font-family: inherit; transition: all .15s;
+      display: inline-flex; align-items: center; gap: 6px;
+    }
+    .btn-primary { background: var(--solar); color: #000; }
+    .btn-primary:hover { background: #d97706; }
+    .btn-secondary { background: var(--surface2); color: var(--text); border: 1px solid var(--border); }
+    .btn-secondary:hover { border-color: var(--solar); color: var(--solar); }
+
+    /* ── Table ── */
+    .table-wrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    th { background: var(--surface2); padding: 8px 12px; text-align: left;
+         font-weight: 600; color: var(--muted); border-bottom: 1px solid var(--border); }
+    td { padding: 8px 12px; border-bottom: 1px solid var(--border); color: var(--text); }
+    tr:hover td { background: var(--surface2); }
+
+    /* ── Misc ── */
+    .section-title { font-size: 15px; font-weight: 700; margin-bottom: 16px; }
+    .mt { margin-top: 24px; }
+    .pill { display: inline-block; padding: 2px 8px; border-radius: 20px; font-size: 11px; font-weight: 600; }
+    .pill-green  { background: rgba(34,197,94,.15);  color: var(--green); }
+    .pill-red    { background: rgba(239,68,68,.15);  color: var(--red); }
+    .pill-solar  { background: rgba(245,158,11,.15); color: var(--solar); }
+    .pill-blue   { background: rgba(59,130,246,.15); color: var(--wind); }
+    .rec-item { padding: 12px 16px; background: var(--surface2); border-radius: 8px;
+                border-left: 3px solid var(--solar); margin-bottom: 10px; font-size: 13px; line-height: 1.5; }
+    .spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid var(--border);
+               border-top-color: var(--solar); border-radius: 50%; animation: spin .6s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .loading { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; }
+    .divider { border: none; border-top: 1px solid var(--border); margin: 20px 0; }
+  </style>
+  {% block extra_head %}{% endblock %}
+</head>
+<body>
+
+<!-- ── Sidebar ─────────────────────────────────────────────────────────────── -->
+<aside class="sidebar">
+  <div class="sidebar-logo">
+    <span class="icon">☀️</span>
+    <div>
+      <div class="brand">SolarWise AI</div>
+      <div class="sub">Renewable Energy Platform</div>
+    </div>
+  </div>
+
+  <div class="nav-section">Overview</div>
+  <a href="/" class="nav-link {% if active=='dashboard' %}active{% endif %}">
+    <span class="nav-icon">📊</span> Dashboard
+  </a>
+
+  <div class="nav-section">Models</div>
+  <a href="/forecast" class="nav-link {% if active=='forecast' %}active{% endif %}">
+    <span class="nav-icon">🔮</span> Forecast
+  </a>
+  <a href="/optimizer" class="nav-link {% if active=='optimizer' %}active{% endif %}">
+    <span class="nav-icon">🔋</span> Optimizer
+  </a>
+  <a href="/allocator" class="nav-link {% if active=='allocator' %}active{% endif %}">
+    <span class="nav-icon">⚡</span> Allocator
+  </a>
+
+  <div class="nav-section">Data & Reports</div>
+  <a href="/dataset" class="nav-link {% if active=='dataset' %}active{% endif %}">
+    <span class="nav-icon">🗄️</span> Dataset
+  </a>
+  <a href="/charts" class="nav-link {% if active=='charts' %}active{% endif %}">
+    <span class="nav-icon">🖼️</span> Charts Gallery
+  </a>
+
+  <div class="sidebar-footer">
+    🌱 Powered by<br>SARIMA · XGBoost · HiGHS LP
+  </div>
+</aside>
+
+<!-- ── Main ────────────────────────────────────────────────────────────────── -->
+<div class="main">
+  <div class="topbar">
+    <div class="topbar-title">{% block page_title %}Dashboard{% endblock %}</div>
+    <div class="topbar-badges">
+      <span class="badge badge-green">● Models Loaded</span>
+      <span class="badge badge-solar">☀️ Solar Active</span>
+      <span class="badge badge-blue">💨 Wind Active</span>
+    </div>
+  </div>
+  <div class="content">
+    {% block content %}{% endblock %}
+  </div>
+</div>
+
+{% block scripts %}{% endblock %}
+</body>
+</html>

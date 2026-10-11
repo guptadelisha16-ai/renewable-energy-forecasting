@@ -1,0 +1,205 @@
+{% extends "base.html" %}
+{% block title %}Forecast{% endblock %}
+{% block page_title %}Generation Forecast{% endblock %}
+
+{% block content %}
+<div class="grid-2-1">
+  <!-- Left: inputs + results -->
+  <div>
+    <div class="card">
+      <div class="section-title">⚙️ Weather Input Parameters</div>
+      <div class="form-grid">
+        <div class="form-group">
+          <label>Hour of Day (0–23)</label>
+          <input type="number" id="f_hour" value="12" min="0" max="23">
+        </div>
+        <div class="form-group">
+          <label>Month (1–12)</label>
+          <input type="number" id="f_month" value="6" min="1" max="12">
+        </div>
+        <div class="form-group">
+          <label>Temperature (°C)</label>
+          <input type="number" id="f_temp" value="32" step="0.1">
+        </div>
+        <div class="form-group">
+          <label>Cloud Cover (%)</label>
+          <input type="number" id="f_cloud" value="20" min="0" max="100">
+        </div>
+        <div class="form-group">
+          <label>Wind Speed (m/s)</label>
+          <input type="number" id="f_wind" value="6" step="0.1">
+        </div>
+        <div class="form-group">
+          <label>Humidity (%)</label>
+          <input type="number" id="f_humidity" value="55" min="0" max="100">
+        </div>
+      </div>
+      <div style="margin-top:18px;display:flex;gap:10px">
+        <button class="btn btn-primary" onclick="runWeatherPredict()">
+          🔮 Predict Generation
+        </button>
+        <button class="btn btn-secondary" onclick="loadPresets('sunny')">☀️ Sunny Day</button>
+        <button class="btn btn-secondary" onclick="loadPresets('cloudy')">☁️ Cloudy</button>
+        <button class="btn btn-secondary" onclick="loadPresets('night')">🌙 Night</button>
+      </div>
+    </div>
+
+    <!-- Result cards -->
+    <div class="grid-2 mt" id="pred-cards" style="display:none">
+      <div class="card">
+        <div class="card-title">☀️ Predicted Irradiance</div>
+        <div class="card-value" id="p_irr" style="color:#f59e0b">—</div>
+        <div class="card-sub">W/m²</div>
+      </div>
+      <div class="card">
+        <div class="card-title">🔆 PV Output</div>
+        <div class="card-value" id="p_pv" style="color:#22c55e">—</div>
+        <div class="card-sub">kW predicted</div>
+      </div>
+      <div class="card">
+        <div class="card-title">💨 Wind Output</div>
+        <div class="card-value" id="p_wind" style="color:#3b82f6">—</div>
+        <div class="card-sub">kW predicted</div>
+      </div>
+      <div class="card">
+        <div class="card-title">⚡ Total Renewable</div>
+        <div class="card-value" id="p_total" style="color:#a855f7">—</div>
+        <div class="card-sub">kW combined</div>
+      </div>
+    </div>
+
+    <!-- 24h Forecast -->
+    <div class="card mt">
+      <div class="card-title">📅 Next 24-Hour PV Forecast (Ensemble)</div>
+      <div class="chart-wrap" style="height:240px"><canvas id="fc24Chart"></canvas></div>
+      <div style="text-align:right;margin-top:8px">
+        <button class="btn btn-secondary" onclick="load24hForecast()" style="font-size:11px">🔄 Refresh</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Right: model info -->
+  <div>
+    <div class="card">
+      <div class="card-title">🧠 Model Architecture</div>
+      <div style="font-size:13px;line-height:1.9;color:#8b949e">
+        <div style="margin-bottom:12px">
+          <div style="color:#e6edf3;font-weight:600;margin-bottom:4px">Stage 1 — Irradiance Prediction</div>
+          Random Forest (200 trees)<br>
+          Inputs: hour, month, temperature,<br>cloud cover, humidity, wind speed
+        </div>
+        <hr class="divider">
+        <div style="margin-bottom:12px">
+          <div style="color:#e6edf3;font-weight:600;margin-bottom:4px">Stage 2 — PV Output</div>
+          XGBoost (500 estimators)<br>
+          Inputs: predicted irradiance +<br>weather features + cyclic time
+        </div>
+        <hr class="divider">
+        <div>
+          <div style="color:#e6edf3;font-weight:600;margin-bottom:4px">Wind Output</div>
+          Gradient Boosted Trees (300 trees)<br>
+          Learns cut-in/rated/cut-out<br>power curve implicitly
+        </div>
+      </div>
+    </div>
+
+    <div class="card mt">
+      <div class="card-title">📊 Forecast Models</div>
+      <div style="font-size:13px;line-height:1.9;color:#8b949e">
+        <div style="margin-bottom:10px">
+          <span class="pill pill-solar">SARIMA</span>
+          <span style="color:#e6edf3;margin-left:6px">Seasonal trend (daily cycle)</span>
+          <br><span style="font-size:11px">Order (1,0,1)(1,0,1)[24] on daily totals + diurnal profile</span>
+        </div>
+        <div style="margin-bottom:10px">
+          <span class="pill pill-blue">XGBoost</span>
+          <span style="color:#e6edf3;margin-left:6px">Non-linear lag features</span>
+          <br><span style="font-size:11px">Lags: 1h, 2h, 3h, 6h, 12h, 24h, 48h + cyclic time features</span>
+        </div>
+        <div>
+          <span class="pill pill-green">Ensemble</span>
+          <span style="color:#e6edf3;margin-left:6px">70% XGB + 30% SARIMA</span>
+          <br><span style="font-size:11px">Weighted combination optimised on validation set</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const PRESETS = {
+  sunny:  { hour:12, month:6,  temp:38, cloud:5,  wind:4,  humidity:30 },
+  cloudy: { hour:10, month:3,  temp:18, cloud:80, wind:8,  humidity:75 },
+  night:  { hour:22, month:12, temp:10, cloud:30, wind:6,  humidity:60 },
+};
+
+function loadPresets(key) {
+  const p = PRESETS[key];
+  document.getElementById('f_hour').value    = p.hour;
+  document.getElementById('f_month').value   = p.month;
+  document.getElementById('f_temp').value    = p.temp;
+  document.getElementById('f_cloud').value   = p.cloud;
+  document.getElementById('f_wind').value    = p.wind;
+  document.getElementById('f_humidity').value= p.humidity;
+  runWeatherPredict();
+}
+
+function runWeatherPredict() {
+  const body = {
+    hour:        +document.getElementById('f_hour').value,
+    month:       +document.getElementById('f_month').value,
+    temperature: +document.getElementById('f_temp').value,
+    cloud_cover: +document.getElementById('f_cloud').value,
+    wind_speed:  +document.getElementById('f_wind').value,
+    humidity:    +document.getElementById('f_humidity').value,
+  };
+  fetch('/api/predict_weather', { method:'POST',
+    headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) })
+  .then(r=>r.json()).then(d => {
+    document.getElementById('pred-cards').style.display = 'grid';
+    document.getElementById('p_irr').textContent   = d.pred_irradiance_wm2;
+    document.getElementById('p_pv').textContent    = d.pred_pv_kw;
+    document.getElementById('p_wind').textContent  = d.pred_wind_kw;
+    document.getElementById('p_total').textContent = d.pred_total_kw;
+  });
+}
+
+let fc24 = null;
+function load24hForecast() {
+  fetch('/api/forecast_24h').then(r=>r.json()).then(d => {
+    const labels = d.hours.map(h => h+':00');
+    const datasets = [
+      { label:'Actual (last 24h)', data: d.actual_last, borderColor:'#8b949e',
+        borderDash:[4,4], borderWidth:1.5, pointRadius:0, tension:0.4 },
+      { label:'SARIMA', data: d.sarima, borderColor:'#f59e0b',
+        borderWidth:1.5, pointRadius:0, tension:0.4, borderDash:[2,3] },
+      { label:'XGBoost', data: d.xgb, borderColor:'#3b82f6',
+        borderWidth:2, pointRadius:0, tension:0.4 },
+      { label:'Ensemble', data: d.ensemble, borderColor:'#22c55e',
+        backgroundColor:'#22c55e22', fill:true,
+        borderWidth:2.5, pointRadius:0, tension:0.4 },
+    ];
+    if (fc24) fc24.destroy();
+    fc24 = new Chart(document.getElementById('fc24Chart'), {
+      type:'line',
+      data:{ labels, datasets },
+      options:{
+        responsive:true, maintainAspectRatio:false,
+        plugins:{ legend:{ labels:{ color:'#8b949e', font:{size:11} } } },
+        scales:{
+          x:{ ticks:{color:'#8b949e'}, grid:{color:'#30363d'} },
+          y:{ ticks:{color:'#8b949e'}, grid:{color:'#30363d'},
+              title:{display:true, text:'PV Output (kW)', color:'#8b949e'} }
+        }
+      }
+    });
+  });
+}
+
+// Auto-run on load
+runWeatherPredict();
+load24hForecast();
+</script>
+{% endblock %}

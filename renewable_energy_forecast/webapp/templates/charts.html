@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block title %}Charts Gallery{% endblock %}
+{% block page_title %}Charts Gallery — All Output Visualizations{% endblock %}
+
+{% block content %}
+<div style="margin-bottom:20px;display:flex;gap:10px;flex-wrap:wrap">
+  <button class="btn btn-secondary" onclick="filterCharts('all')">All ({{ charts|length }})</button>
+  <button class="btn btn-secondary" onclick="filterCharts('overview')">📊 Overview</button>
+  <button class="btn btn-secondary" onclick="filterCharts('forecast')">🔮 Forecast</button>
+  <button class="btn btn-secondary" onclick="filterCharts('battery')">🔋 Battery</button>
+  <button class="btn btn-secondary" onclick="filterCharts('analysis')">🔬 Analysis</button>
+</div>
+
+<div id="gallery" style="display:grid;grid-template-columns:repeat(2,1fr);gap:20px">
+  {% for chart in charts %}
+  <div class="card chart-card" data-name="{{ chart }}" style="cursor:pointer" onclick="openModal('{{ chart }}')">
+    <div class="card-title">{{ chart.replace('_',' ').replace('.png','') }}</div>
+    <img src="/outputs/{{ chart }}" alt="{{ chart }}"
+         style="width:100%;border-radius:6px;margin-top:8px;display:block">
+    <div style="margin-top:8px;display:flex;justify-content:space-between;align-items:center">
+      <span style="font-size:11px;color:#8b949e">Click to expand</span>
+      <a href="/outputs/{{ chart }}" download class="btn btn-secondary"
+         style="font-size:11px;padding:4px 10px" onclick="event.stopPropagation()">⬇ Download</a>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+
+<!-- Modal lightbox -->
+<div id="modal" onclick="closeModal()"
+     style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:999;
+            align-items:center;justify-content:center;cursor:zoom-out">
+  <div onclick="event.stopPropagation()"
+       style="max-width:90vw;max-height:90vh;position:relative">
+    <img id="modal-img" src="" style="max-width:90vw;max-height:85vh;border-radius:8px;display:block">
+    <div id="modal-title"
+         style="text-align:center;margin-top:10px;color:#e6edf3;font-size:13px"></div>
+    <button onclick="closeModal()"
+            style="position:absolute;top:-12px;right:-12px;background:#ef4444;border:none;
+                   color:#fff;width:28px;height:28px;border-radius:50%;cursor:pointer;
+                   font-size:14px;font-weight:bold">✕</button>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const CHART_TAGS = {
+  '01_dataset_overview':  ['all','overview'],
+  '02_seasonal_pv_profile': ['all','overview','forecast'],
+  '03_correlation_heatmap': ['all','analysis'],
+  '04_forecast_vs_actual':  ['all','forecast'],
+  '05_feature_importance':  ['all','analysis','forecast'],
+  '06_battery_schedule':    ['all','battery'],
+  '07_energy_allocation':   ['all','battery'],
+  '08_kpi_dashboard':       ['all','overview'],
+  '09_wind_power_curve':    ['all','analysis'],
+  '10_error_distribution':  ['all','analysis','forecast'],
+};
+
+function filterCharts(tag) {
+  document.querySelectorAll('.chart-card').forEach(card => {
+    const name = card.dataset.name.replace('.png','');
+    const tags = CHART_TAGS[name] || ['all'];
+    card.style.display = tags.includes(tag) ? 'block' : 'none';
+  });
+}
+
+function openModal(chart) {
+  const m = document.getElementById('modal');
+  document.getElementById('modal-img').src = '/outputs/' + chart;
+  document.getElementById('modal-title').textContent = chart.replace(/_/g,' ').replace('.png','');
+  m.style.display = 'flex';
+}
+function closeModal() {
+  document.getElementById('modal').style.display = 'none';
+}
+document.addEventListener('keydown', e => { if (e.key==='Escape') closeModal(); });
+</script>
+{% endblock %}

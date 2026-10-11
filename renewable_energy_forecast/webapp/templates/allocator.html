@@ -1,0 +1,202 @@
+{% extends "base.html" %}
+{% block title %}Energy Allocator{% endblock %}
+{% block page_title %}Energy Allocation & Recommendations{% endblock %}
+
+{% block content %}
+<!-- Controls -->
+<div class="card">
+  <div class="section-title">⚙️ Allocation Parameters</div>
+  <div style="display:flex;gap:16px;align-items:flex-end;flex-wrap:wrap">
+    <div class="form-group">
+      <label>Target Date</label>
+      <input type="date" id="al_date" value="2023-06-15">
+    </div>
+    <div class="form-group">
+      <label>Battery Capacity (kWh)</label>
+      <input type="number" id="al_cap" value="40" min="5" max="200">
+    </div>
+    <button class="btn btn-primary" onclick="runAllocator()">⚡ Run Allocation</button>
+  </div>
+</div>
+
+<!-- KPI Cards -->
+<div class="grid-4 mt" id="al-kpis" style="display:none"></div>
+
+<!-- Recommendations -->
+<div class="card mt" id="al-recs" style="display:none">
+  <div class="section-title">💡 Operator Recommendations</div>
+  <div id="recs-body"></div>
+</div>
+
+<!-- Charts -->
+<div class="grid-2 mt" id="al-charts" style="display:none">
+  <div class="card">
+    <div class="card-title">📊 Hourly Energy Source Stack</div>
+    <div class="chart-wrap" style="height:260px"><canvas id="srcChart"></canvas></div>
+  </div>
+  <div class="card">
+    <div class="card-title">🥧 24h Energy Source Split</div>
+    <div class="chart-wrap" style="height:260px"><canvas id="pieChart"></canvas></div>
+  </div>
+</div>
+
+<div class="card mt" id="al-sself" style="display:none">
+  <div class="card-title">🏠 Self-Sufficiency by Hour (%)</div>
+  <div class="chart-wrap" style="height:180px"><canvas id="ssChart"></canvas></div>
+</div>
+
+<!-- Dispatch table -->
+<div class="card mt" id="al-dispatch" style="display:none">
+  <div class="card-title">📋 Priority Dispatch — Hourly Actions</div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Hour</th><th>State</th>
+          <th>Renewable %</th><th>Battery %</th><th>Grid %</th>
+          <th>Action</th>
+        </tr>
+      </thead>
+      <tbody id="dispatch-body"></tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let srcChrt=null, piChrt=null, ssChrt=null;
+
+const STATE_COLORS = {
+  SURPLUS_HIGH:   '#22c55e',
+  SURPLUS_LOW:    '#86efac',
+  BALANCED:       '#3b82f6',
+  DEFICIT_LOW:    '#f59e0b',
+  DEFICIT_HIGH:   '#ef4444',
+  NIGHT_LOW_WIND: '#8b949e',
+};
+
+function runAllocator() {
+  const body = {
+    date:         document.getElementById('al_date').value,
+    capacity_kwh: +document.getElementById('al_cap').value,
+  };
+  fetch('/api/allocate', { method:'POST',
+    headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) })
+  .then(r=>r.json()).then(d => {
+    const k = d.kpis;
+    const h = d.hourly;
+    const p = d.dispatch;
+    const hours = h.hour.map(v=>v+':00');
+
+    // KPIs
+    const kpiDef = [
+      { label:'Self-Sufficiency',    value: k.avg_self_sufficiency_pct+'%',    color:'#22c55e' },
+      { label:'Renewable Coverage',  value: k.renewable_coverage_pct+'%',      color:'#f59e0b' },
+      { label:'Fossil Fraction',     value: k.fossil_fraction_pct+'%',          color:'#ef4444' },
+      { label:'CO₂ Avoided',          value: k.co2_avoided_kg+' kg',            color:'#a855f7' },
+      { label:'Total Load',          value: k.total_load_kwh+' kWh',            color:'#8b949e' },
+      { label:'Renewable Generated', value: k.total_renewable_kwh+' kWh',       color:'#f59e0b' },
+      { label:'Grid Import',         value: k.total_grid_import_kwh+' kWh',     color:'#ef4444' },
+      { label:'Grid Cost',           value: '$'+k.estimated_cost_usd,           color:'#3b82f6' },
+    ];
+    document.getElementById('al-kpis').style.display = 'grid';
+    document.getElementById('al-kpis').style.gridTemplateColumns = 'repeat(4,1fr)';
+    document.getElementById('al-kpis').innerHTML = kpiDef.map(kp=>
+      `<div class="card">
+        <div class="card-title">${kp.label}</div>
+        <div class="card-value" style="font-size:22px;color:${kp.color}">${kp.value}</div>
+      </div>`).join('');
+
+    // Recommendations
+    document.getElementById('al-recs').style.display = 'block';
+    document.getElementById('recs-body').innerHTML =
+      d.recommendations.map(r=>`<div class="rec-item">${r}</div>`).join('');
+
+    // Charts
+    document.getElementById('al-charts').style.display = 'grid';
+    document.getElementById('al-sself').style.display  = 'block';
+    document.getElementById('al-dispatch').style.display = 'block';
+
+    // Source stack
+    if (srcChrt) srcChrt.destroy();
+    srcChrt = new Chart(document.getElementById('srcChart'), {
+      type:'bar',
+      data:{
+        labels: hours,
+        datasets:[
+          { label:'Renewable', data: h.renewable_kw,   backgroundColor:'#f59e0b88', stack:'s' },
+          { label:'Battery',   data: h.discharge_kw,   backgroundColor:'#22c55e88', stack:'s' },
+          { label:'Grid',      data: h.grid_import_kw, backgroundColor:'#ef444488', stack:'s' },
+        ]
+      },
+      options:{
+        responsive:true, maintainAspectRatio:false,
+        plugins:{ legend:{ labels:{ color:'#8b949e', font:{size:11} } } },
+        scales:{
+          x:{ ticks:{color:'#8b949e', maxTicksLimit:12}, grid:{color:'#30363d'}, stacked:true },
+          y:{ ticks:{color:'#8b949e'}, grid:{color:'#30363d'}, stacked:true,
+              title:{display:true, text:'kW', color:'#8b949e'} }
+        }
+      }
+    });
+
+    // Pie
+    const totRen  = h.renewable_kw.reduce((a,b)=>a+b,0);
+    const totBat  = h.discharge_kw.reduce((a,b)=>a+b,0);
+    const totGrid = h.grid_import_kw.reduce((a,b)=>a+b,0);
+    if (piChrt) piChrt.destroy();
+    piChrt = new Chart(document.getElementById('pieChart'), {
+      type:'doughnut',
+      data:{
+        labels:['Renewable','Battery Discharge','Grid Import'],
+        datasets:[{ data:[totRen.toFixed(1), totBat.toFixed(1), totGrid.toFixed(1)],
+          backgroundColor:['#f59e0b','#22c55e','#ef4444'],
+          borderColor:'#161b22', borderWidth:3 }]
+      },
+      options:{
+        responsive:true, maintainAspectRatio:false,
+        plugins:{ legend:{ labels:{ color:'#8b949e', font:{size:12} } } }
+      }
+    });
+
+    // Self-sufficiency bar
+    const ssColors = h.self_suff_pct.map(v=> v>=80?'#22c55e88':v>=60?'#f59e0b88':'#ef444488');
+    if (ssChrt) ssChrt.destroy();
+    ssChrt = new Chart(document.getElementById('ssChart'), {
+      type:'bar',
+      data:{ labels:hours, datasets:[{
+        label:'Self-Sufficiency %', data: h.self_suff_pct,
+        backgroundColor: ssColors,
+      }]},
+      options:{
+        responsive:true, maintainAspectRatio:false,
+        plugins:{ legend:{ display:false } },
+        scales:{
+          x:{ ticks:{color:'#8b949e', maxTicksLimit:12}, grid:{color:'#30363d'} },
+          y:{ ticks:{color:'#8b949e'}, grid:{color:'#30363d'}, min:0, max:100,
+              title:{display:true, text:'%', color:'#8b949e'} }
+        }
+      }
+    });
+
+    // Dispatch table
+    const tbody = document.getElementById('dispatch-body');
+    tbody.innerHTML = '';
+    for (let i=0; i<p.hour.length; i++) {
+      const stColor = STATE_COLORS[p.state[i]] || '#8b949e';
+      tbody.innerHTML += `<tr>
+        <td><b>${p.hour[i]}:00</b></td>
+        <td><span style="color:${stColor};font-weight:600">${p.state[i]}</span></td>
+        <td>${p['src_renewable_%'][i]}%</td>
+        <td>${p['src_battery_%'][i]}%</td>
+        <td>${p['src_grid_%'][i]}%</td>
+        <td style="font-size:11px;color:#8b949e">${p.action[i]}</td>
+      </tr>`;
+    }
+  });
+}
+
+runAllocator();
+</script>
+{% endblock %}

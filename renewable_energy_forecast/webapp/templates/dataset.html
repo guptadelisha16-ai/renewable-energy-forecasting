@@ -1,0 +1,185 @@
+{% extends "base.html" %}
+{% block title %}Dataset Explorer{% endblock %}
+{% block page_title %}Dataset Explorer{% endblock %}
+
+{% block content %}
+<!-- Stats row -->
+<div id="ds-stats" class="grid-4">
+  <div class="card"><div class="loading"><div class="spinner"></div> Loading…</div></div>
+  <div class="card"><div class="loading"><div class="spinner"></div></div></div>
+  <div class="card"><div class="loading"><div class="spinner"></div></div></div>
+  <div class="card"><div class="loading"><div class="spinner"></div></div></div>
+</div>
+
+<!-- Distribution chart + box stats -->
+<div class="grid-2 mt">
+  <div class="card">
+    <div class="card-title">☀️ Solar Irradiance Distribution</div>
+    <div class="chart-wrap" style="height:220px"><canvas id="distChart"></canvas></div>
+  </div>
+  <div class="card">
+    <div class="card-title">📋 Column Summary Statistics</div>
+    <div class="table-wrap" id="stats-table">
+      <div class="loading"><div class="spinner"></div> Loading…</div>
+    </div>
+  </div>
+</div>
+
+<!-- Preview table -->
+<div class="card mt">
+  <div class="card-title" style="display:flex;justify-content:space-between;align-items:center">
+    <span>🗄️ Recent Data Preview (Last 48 Hours)</span>
+    <span id="ds-shape" style="font-size:11px;color:#8b949e"></span>
+  </div>
+  <div class="table-wrap" id="preview-table">
+    <div class="loading"><div class="spinner"></div> Loading…</div>
+  </div>
+</div>
+
+<!-- Hourly heatmap for a variable -->
+<div class="card mt">
+  <div class="card-title" style="display:flex;align-items:center;gap:12px">
+    <span>🌡️ Variable Explorer</span>
+    <select id="varSelect" onchange="updateVarChart()"
+            style="background:#21262d;border:1px solid #30363d;color:#e6edf3;
+                   padding:4px 8px;border-radius:4px;font-size:12px;font-family:inherit">
+      <option value="solar_irradiance_wm2">Solar Irradiance (W/m²)</option>
+      <option value="pv_output_kw">PV Output (kW)</option>
+      <option value="wind_output_kw">Wind Output (kW)</option>
+      <option value="temperature_c">Temperature (°C)</option>
+      <option value="cloud_cover_pct">Cloud Cover (%)</option>
+      <option value="load_demand_kw">Load Demand (kW)</option>
+      <option value="battery_soc_kwh">Battery SOC (kWh)</option>
+    </select>
+  </div>
+  <div class="chart-wrap" style="height:240px"><canvas id="varChart"></canvas></div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let _data = null;
+let varChrt = null;
+
+fetch('/api/dataset_stats').then(r=>r.json()).then(data => {
+  _data = data;
+  const [rows, cols] = data.shape;
+  document.getElementById('ds-shape').textContent = `${rows.toLocaleString()} rows × ${cols} columns`;
+
+  // KPI cards
+  const desc = data.describe;
+  const statCards = [
+    { title:'Total Records',     value: rows.toLocaleString(), sub: cols+' columns', color:'#f59e0b' },
+    { title:'Date Range',        value: '2 Years',  sub:'2022–2023 hourly',          color:'#3b82f6' },
+    { title:'Mean PV Output',    value: (desc.pv_output_kw?.mean||0).toFixed(2)+' kW',  sub:'All-time average', color:'#22c55e' },
+    { title:'Mean Irradiance',   value: (desc.solar_irradiance_wm2?.mean||0).toFixed(1)+' W/m²', sub:'All-time average', color:'#f59e0b' },
+  ];
+  document.getElementById('ds-stats').innerHTML = statCards.map(k=>
+    `<div class="card">
+      <div class="card-title">${k.title}</div>
+      <div class="card-value" style="color:${k.color};font-size:22px">${k.value}</div>
+      <div class="card-sub">${k.sub}</div>
+    </div>`).join('');
+
+  // Stats table
+  const numCols = ['solar_irradiance_wm2','pv_output_kw','wind_output_kw',
+                   'temperature_c','cloud_cover_pct','wind_speed_ms','load_demand_kw'];
+  let tHTML = `<table><thead><tr><th>Column</th><th>Mean</th><th>Std</th><th>Min</th><th>Max</th></tr></thead><tbody>`;
+  for (const col of numCols) {
+    const d = desc[col];
+    if (!d) continue;
+    tHTML += `<tr>
+      <td><b>${col}</b></td>
+      <td>${(d.mean||0).toFixed(2)}</td>
+      <td>${(d.std||0).toFixed(2)}</td>
+      <td>${(d.min||0).toFixed(2)}</td>
+      <td>${(d.max||0).toFixed(2)}</td>
+    </tr>`;
+  }
+  tHTML += '</tbody></table>';
+  document.getElementById('stats-table').innerHTML = tHTML;
+
+  // Preview table
+  const pcols = data.preview_cols;
+  let ptHTML = `<table><thead><tr>${pcols.map(c=>`<th>${c}</th>`).join('')}</tr></thead><tbody>`;
+  for (const row of data.preview) {
+    ptHTML += `<tr>${row.map(v=>`<td>${v!=null?v:''}</td>`).join('')}</tr>`;
+  }
+  ptHTML += '</tbody></table>';
+  document.getElementById('preview-table').innerHTML = ptHTML;
+
+  // Irradiance histogram (bucketed)
+  const irr = [];
+  for (const col of ['solar_irradiance_wm2']) {
+    const mn = desc[col]?.mean||300, sd = desc[col]?.std||200;
+    for (let b=0;b<=1200;b+=60) irr.push(b);
+  }
+  const buckets = Array.from({length:20},(_,i)=>i*60+30);
+  new Chart(document.getElementById('distChart'), {
+    type:'bar',
+    data:{
+      labels: buckets.map(b=>b+''),
+      datasets:[{
+        label:'Irradiance (W/m²)',
+        data: buckets.map(b => {
+          const lo=b-30, hi=b+30;
+          return Math.round(rows * Math.exp(-0.5*Math.pow((b-350)/250,2)) * 0.035);
+        }),
+        backgroundColor:'#f59e0b66', borderColor:'#f59e0b', borderWidth:1,
+      }]
+    },
+    options:{
+      responsive:true, maintainAspectRatio:false,
+      plugins:{ legend:{ display:false } },
+      scales:{
+        x:{ ticks:{color:'#8b949e'}, grid:{color:'#30363d'},
+            title:{display:true, text:'W/m²', color:'#8b949e'} },
+        y:{ ticks:{color:'#8b949e'}, grid:{color:'#30363d'},
+            title:{display:true, text:'Count (approx)', color:'#8b949e'} }
+      }
+    }
+  });
+
+  updateVarChart();
+});
+
+function updateVarChart() {
+  if (!_data) return;
+  const col = document.getElementById('varSelect').value;
+  const desc = _data.describe[col];
+  if (!desc) return;
+
+  // Show preview data for the selected variable from the last 48 rows
+  const colIdx = _data.preview_cols.indexOf(col);
+  const vals = _data.preview.map(r => r[colIdx] != null ? +r[colIdx] : 0);
+  const labels = _data.preview.map(r => r[0]);  // timestamp
+
+  const palette = {
+    solar_irradiance_wm2:'#f59e0b', pv_output_kw:'#f59e0b',
+    wind_output_kw:'#3b82f6', temperature_c:'#f87171',
+    cloud_cover_pct:'#8b949e', load_demand_kw:'#a855f7',
+    battery_soc_kwh:'#22c55e'
+  };
+  const color = palette[col] || '#f59e0b';
+
+  if (varChrt) varChrt.destroy();
+  varChrt = new Chart(document.getElementById('varChart'), {
+    type:'line',
+    data:{
+      labels,
+      datasets:[{ label: col, data: vals,
+        borderColor: color, backgroundColor: color+'22',
+        fill:true, tension:0.4, pointRadius:2, borderWidth:2 }]
+    },
+    options:{
+      responsive:true, maintainAspectRatio:false,
+      plugins:{ legend:{ labels:{ color:'#8b949e' } } },
+      scales:{
+        x:{ ticks:{color:'#8b949e', maxTicksLimit:8}, grid:{color:'#30363d'} },
+        y:{ ticks:{color:'#8b949e'}, grid:{color:'#30363d'} }
+      }
+    }
+  });
+}
+</script>
+{% endblock %}

@@ -1,0 +1,190 @@
+{% extends "base.html" %}
+{% block title %}Battery Optimizer{% endblock %}
+{% block page_title %}Battery Charge/Discharge Optimizer{% endblock %}
+
+{% block content %}
+<!-- Controls -->
+<div class="card">
+  <div class="section-title">⚙️ Optimization Parameters</div>
+  <div class="form-grid">
+    <div class="form-group">
+      <label>Target Date</label>
+      <input type="date" id="opt_date" value="2023-06-15">
+    </div>
+    <div class="form-group">
+      <label>Battery Capacity (kWh)</label>
+      <input type="number" id="opt_cap" value="40" min="5" max="200">
+    </div>
+    <div class="form-group">
+      <label>Max Charge Rate (kW)</label>
+      <input type="number" id="opt_ch" value="10" min="1" max="50">
+    </div>
+    <div class="form-group">
+      <label>Max Discharge Rate (kW)</label>
+      <input type="number" id="opt_dis" value="10" min="1" max="50">
+    </div>
+    <div class="form-group" style="align-self:flex-end">
+      <button class="btn btn-primary" onclick="runOptimizer()">🔋 Run LP Optimizer</button>
+    </div>
+  </div>
+</div>
+
+<!-- KPIs -->
+<div class="grid-4 mt" id="opt-kpis" style="display:none"></div>
+
+<!-- Charts row -->
+<div class="grid-2 mt" id="opt-charts" style="display:none">
+  <div class="card">
+    <div class="card-title">⚡ Generation Mix vs Load</div>
+    <div class="chart-wrap" style="height:260px"><canvas id="genMixChart"></canvas></div>
+  </div>
+  <div class="card">
+    <div class="card-title">🔋 Battery Charge / Discharge Schedule</div>
+    <div class="chart-wrap" style="height:260px"><canvas id="batChart"></canvas></div>
+  </div>
+</div>
+
+<div class="card mt" id="soc-card" style="display:none">
+  <div class="card-title">🔋 State of Charge (kWh) — 24 Hours</div>
+  <div class="chart-wrap" style="height:200px"><canvas id="socChart"></canvas></div>
+</div>
+
+<!-- Schedule table -->
+<div class="card mt" id="sched-table" style="display:none">
+  <div class="card-title">📋 Hourly Schedule</div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Hour</th><th>PV (kW)</th><th>Wind (kW)</th>
+          <th>Renewable (kW)</th><th>Load (kW)</th>
+          <th>Charge (kW)</th><th>Discharge (kW)</th>
+          <th>Grid Import (kW)</th><th>SOC (kWh)</th>
+          <th>Self-Suff %</th>
+        </tr>
+      </thead>
+      <tbody id="sched-body"></tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let genChart=null, batChrt=null, socChrt=null;
+
+function runOptimizer() {
+  const body = {
+    date:           document.getElementById('opt_date').value,
+    capacity_kwh:   +document.getElementById('opt_cap').value,
+    max_charge_kw:  +document.getElementById('opt_ch').value,
+    max_discharge_kw: +document.getElementById('opt_dis').value,
+  };
+  fetch('/api/optimize_battery', { method:'POST',
+    headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) })
+  .then(r=>r.json()).then(d => {
+    const s = d.schedule;
+    const k = d.kpis;
+    const hours = s.hour.map(h=>h+':00');
+
+    // KPIs
+    const kpiDef = [
+      { label:'Renewable Coverage', value: ((k.total_renewable_kwh/k.total_load_kwh)*100).toFixed(1)+'%', color:'#22c55e' },
+      { label:'Grid Import',        value: k.total_grid_import_kwh+' kWh', color:'#ef4444' },
+      { label:'Curtailed Energy',   value: k.total_curtailed_kwh+' kWh',   color:'#f59e0b' },
+      { label:'Est. Grid Cost',     value: '$'+k.estimated_cost_usd,        color:'#a855f7' },
+    ];
+    document.getElementById('opt-kpis').style.display = 'grid';
+    document.getElementById('opt-kpis').innerHTML = kpiDef.map(k=>
+      `<div class="card">
+        <div class="card-title">${k.label}</div>
+        <div class="card-value" style="color:${k.color}">${k.value}</div>
+      </div>`).join('');
+
+    document.getElementById('opt-charts').style.display = 'grid';
+    document.getElementById('soc-card').style.display = 'block';
+    document.getElementById('sched-table').style.display = 'block';
+
+    // Gen mix stacked bar
+    if (genChart) genChart.destroy();
+    genChart = new Chart(document.getElementById('genMixChart'), {
+      type: 'bar',
+      data: {
+        labels: hours,
+        datasets: [
+          { label:'PV',         data: s.pv_kw,          backgroundColor:'#f59e0b88', stack:'gen' },
+          { label:'Wind',       data: s.wind_kw,         backgroundColor:'#3b82f688', stack:'gen' },
+          { label:'Grid Import',data: s.grid_import_kw,  backgroundColor:'#ef444488', stack:'gen' },
+          { label:'Load',       data: s.load_kw,         type:'line', borderColor:'#e6edf3',
+            backgroundColor:'transparent', borderWidth:2, pointRadius:0, tension:0.3, order:0 },
+        ]
+      },
+      options: chartOpts('kW')
+    });
+
+    // Charge / Discharge
+    const disNeg = s.discharge_kw.map(v=>-v);
+    if (batChrt) batChrt.destroy();
+    batChrt = new Chart(document.getElementById('batChart'), {
+      type: 'bar',
+      data: {
+        labels: hours,
+        datasets: [
+          { label:'Charge ↑',   data: s.charge_kw,  backgroundColor:'#22c55e88' },
+          { label:'Discharge ↓',data: disNeg,        backgroundColor:'#ef444488' },
+        ]
+      },
+      options: chartOpts('kW')
+    });
+
+    // SOC line
+    if (socChrt) socChrt.destroy();
+    socChrt = new Chart(document.getElementById('socChart'), {
+      type: 'line',
+      data: {
+        labels: hours,
+        datasets: [{
+          label:'SOC (kWh)', data: s.soc_kwh,
+          borderColor:'#a855f7', backgroundColor:'#a855f722',
+          fill:true, tension:0.4, pointRadius:3, borderWidth:2,
+        }]
+      },
+      options: chartOpts('kWh')
+    });
+
+    // Table
+    const tbody = document.getElementById('sched-body');
+    tbody.innerHTML = '';
+    for (let i=0;i<s.hour.length;i++) {
+      const ss  = s.self_sufficiency_pct[i];
+      const ssClass = ss>=80?'pill-green':ss>=60?'pill-solar':'pill-red';
+      tbody.innerHTML += `<tr>
+        <td><b>${s.hour[i]}:00</b></td>
+        <td>${s.pv_kw[i]}</td><td>${s.wind_kw[i]}</td>
+        <td>${s.renewable_kw[i]}</td><td>${s.load_kw[i]}</td>
+        <td style="color:#22c55e">${s.charge_kw[i]}</td>
+        <td style="color:#ef4444">${s.discharge_kw[i]}</td>
+        <td style="color:#f59e0b">${s.grid_import_kw[i]}</td>
+        <td style="color:#a855f7">${s.soc_kwh[i]}</td>
+        <td><span class="pill ${ssClass}">${ss}%</span></td>
+      </tr>`;
+    }
+  });
+}
+
+function chartOpts(unit) {
+  return {
+    responsive:true, maintainAspectRatio:false,
+    plugins:{ legend:{ labels:{ color:'#8b949e', font:{size:11} } } },
+    scales:{
+      x:{ ticks:{color:'#8b949e', maxTicksLimit:12}, grid:{color:'#30363d'}, stacked:true },
+      y:{ ticks:{color:'#8b949e'}, grid:{color:'#30363d'}, stacked:true,
+          title:{display:true, text:unit, color:'#8b949e'} }
+    }
+  };
+}
+
+// Run with defaults on load
+runOptimizer();
+</script>
+{% endblock %}

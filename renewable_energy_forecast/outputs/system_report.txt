@@ -1,0 +1,52 @@
+======================================================================
+  RENEWABLE ENERGY FORECASTING & OPTIMIZATION — SYSTEM REPORT
+======================================================================
+
+── Model Performance ───────────────────────────────────────────────
+
+  Weather-Based Prediction:
+    irradiance_RF             RMSE=16.901  MAE=9.647  R²=0.9980
+    pv_XGBoost                RMSE=0.123  MAE=0.082  R²=0.9989
+    wind_GB                   RMSE=0.021  MAE=0.016  R²=0.9912
+
+  Time-Series Forecasting:
+    XGBoost         RMSE=0.054  MAE=0.040  R²=0.9998
+    SARIMA          RMSE=1.362  MAE=0.825  R²=0.8610
+    Ensemble        RMSE=0.411  MAE=0.257  R²=0.9873
+
+── 24-Hour Energy Allocation KPIs ──────────────────────────────────
+
+    Total Load                 : 120.70 kWh
+    Total Renewable Generated  : 103.33 kWh
+    Grid Import (Fossil)       : 25.47 kWh
+    Renewable Coverage         : 85.6 %
+    Fossil Fraction            : 21.1 %
+    Curtailed Energy           : 16.61 kWh
+    Avg Self-Sufficiency       : 83.0 %
+    CO₂ Avoided                : 36.4 kg
+    Estimated Grid Cost        : $3.06 USD
+
+── Operator Recommendations ────────────────────────────────────────
+
+    ✅ Excellent self-sufficiency (83.0%). The site is largely energy-independent today.
+    ♻️  16.1% of renewable generation is curtailed. Increase battery capacity or enable grid export to reduce waste.
+    ⚡ Grid import peaks at hours: 02:00, 03:00, 04:00, 06:00. Shift flexible loads away from these windows.
+    🚗 11.7 kWh of EV charging deferred to protect battery reserves. Schedule EV charging during surplus hours (typically 10:00–15:00).
+    🌙 Battery SOC drops below 25% on multiple night hours. Consider pre-charging to 60–70% before sunset.
+    🌱 Estimated CO₂ avoided today: 36.4 kg (equivalent to 1.7 tree-days of absorption).
+    💰 Estimated grid electricity cost today: $3.06 USD at $0.12/kWh tariff.
+
+── Output Charts ───────────────────────────────────────────────────
+
+    overview               → renewable_energy_forecast\outputs\01_dataset_overview.png
+    seasonal               → renewable_energy_forecast\outputs\02_seasonal_pv_profile.png
+    correlation            → renewable_energy_forecast\outputs\03_correlation_heatmap.png
+    forecast               → renewable_energy_forecast\outputs\04_forecast_vs_actual.png
+    feature_imp            → renewable_energy_forecast\outputs\05_feature_importance.png
+    battery_schedule       → renewable_energy_forecast\outputs\06_battery_schedule.png
+    allocation             → renewable_energy_forecast\outputs\07_energy_allocation.png
+    kpi_dashboard          → renewable_energy_forecast\outputs\08_kpi_dashboard.png
+    wind_curve             → renewable_energy_forecast\outputs\09_wind_power_curve.png
+    error_dist             → renewable_energy_forecast\outputs\10_error_distribution.png
+
+======================================================================

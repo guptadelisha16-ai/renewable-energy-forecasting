@@ -1,0 +1,173 @@
+{% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
+{% block page_title %}Dashboard — System Overview{% endblock %}
+
+{% block content %}
+<!-- KPI Row -->
+<div class="grid-4" id="kpi-row">
+  <div class="card"><div class="loading"><div class="spinner"></div> Loading…</div></div>
+  <div class="card"><div class="loading"><div class="spinner"></div> Loading…</div></div>
+  <div class="card"><div class="loading"><div class="spinner"></div> Loading…</div></div>
+  <div class="card"><div class="loading"><div class="spinner"></div> Loading…</div></div>
+</div>
+
+<div class="grid-4 mt" id="kpi-row2">
+  <div class="card"><div class="loading"><div class="spinner"></div> Loading…</div></div>
+  <div class="card"><div class="loading"><div class="spinner"></div> Loading…</div></div>
+  <div class="card"><div class="loading"><div class="spinner"></div> Loading…</div></div>
+  <div class="card"><div class="loading"><div class="spinner"></div> Loading…</div></div>
+</div>
+
+<!-- Sparkline charts -->
+<div class="mt">
+  <div class="section-title">30-Day Generation Trend</div>
+  <div class="grid-3">
+    <div class="card">
+      <div class="card-title">☀️ Daily PV Output (kWh)</div>
+      <div class="chart-wrap" style="height:160px"><canvas id="sparkPV"></canvas></div>
+    </div>
+    <div class="card">
+      <div class="card-title">💨 Daily Wind Output (kWh)</div>
+      <div class="chart-wrap" style="height:160px"><canvas id="sparkWind"></canvas></div>
+    </div>
+    <div class="card">
+      <div class="card-title">🏠 Daily Load Demand (kWh)</div>
+      <div class="chart-wrap" style="height:160px"><canvas id="sparkLoad"></canvas></div>
+    </div>
+  </div>
+</div>
+
+<!-- Seasonal Profile -->
+<div class="mt">
+  <div class="section-title">Seasonal Hourly PV Profile</div>
+  <div class="card">
+    <div class="chart-wrap" style="height:280px"><canvas id="seasonChart"></canvas></div>
+  </div>
+</div>
+
+<!-- Model Performance -->
+<div class="mt">
+  <div class="section-title">Model Performance Metrics</div>
+  <div class="grid-2">
+    <div class="card" id="weath-metrics">
+      <div class="card-title">🌤️ Weather-Based Prediction</div>
+      <div class="loading"><div class="spinner"></div> Loading…</div>
+    </div>
+    <div class="card" id="ts-metrics">
+      <div class="card-title">📈 Time-Series Forecasting</div>
+      <div class="loading"><div class="spinner"></div> Loading…</div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const COLORS = { solar:'#f59e0b', wind:'#3b82f6', load:'#a855f7',
+                 green:'#22c55e', red:'#ef4444', muted:'#8b949e' };
+
+function sparkChart(id, labels, data, color, label) {
+  new Chart(document.getElementById(id), {
+    type: 'line',
+    data: { labels, datasets: [{ label, data, borderColor: color,
+            backgroundColor: color+'22', fill: true, tension: 0.4,
+            pointRadius: 0, borderWidth: 2 }] },
+    options: { responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { ticks: { color:'#8b949e', maxTicksLimit:6, font:{size:10} },
+             grid: { color:'#30363d' } },
+        y: { ticks: { color:'#8b949e', font:{size:10} }, grid: { color:'#30363d' } }
+      }
+    }
+  });
+}
+
+function metricRow(name, m) {
+  const r2color = m.R2 >= 0.98 ? COLORS.green : m.R2 >= 0.90 ? COLORS.solar : COLORS.red;
+  return `<div style="display:flex;justify-content:space-between;align-items:center;
+          padding:10px 0;border-bottom:1px solid #30363d">
+    <span style="font-size:12px;color:#e6edf3">${name}</span>
+    <span style="display:flex;gap:16px;font-size:12px">
+      <span style="color:#8b949e">RMSE <b style="color:#e6edf3">${m.RMSE}</b></span>
+      <span style="color:#8b949e">MAE <b style="color:#e6edf3">${m.MAE}</b></span>
+      <span style="color:#8b949e">R² <b style="color:${r2color}">${m.R2}</b></span>
+    </span>
+  </div>`;
+}
+
+// ── Load KPIs ─────────────────────────────────────────────────────────────────
+fetch('/api/dashboard_kpis').then(r=>r.json()).then(data => {
+  const k = data.kpis;
+  const kpis1 = [
+    { icon:'☀️', title:'Total PV Generated', value: k.total_pv_mwh+' MWh',       sub:'2-year total',        accent:'☀️', color: COLORS.solar },
+    { icon:'💨', title:'Total Wind Generated',value: k.total_wind_mwh+' MWh',     sub:'2-year total',        accent:'💨', color: COLORS.wind },
+    { icon:'⚡', title:'Total Renewable',     value: k.total_renewable_mwh+' MWh', sub:'PV + Wind combined',  accent:'⚡', color: COLORS.green },
+    { icon:'🌱', title:'CO₂ Avoided',          value: k.co2_avoided_tonnes+' t',   sub:'vs. grid equivalent', accent:'🌱', color:'#22c55e' },
+  ];
+  const kpis2 = [
+    { icon:'🌡️', title:'Avg Temperature',    value: k.avg_temperature+'°C',   sub:'All-time average',     accent:'🌡️', color:'#f87171' },
+    { icon:'🌤️', title:'Avg Solar Irradiance',value: k.avg_irradiance+' W/m²', sub:'All-time average',     accent:'🌤️', color: COLORS.solar },
+    { icon:'🔋', title:'Avg Battery SOC',     value: k.avg_battery_soc+' kWh',  sub:'Mean state of charge', accent:'🔋', color:'#a78bfa' },
+    { icon:'🏠', title:'Self-Sufficiency',    value: k.self_sufficiency+'%',     sub:'Renewable coverage',   accent:'🏠', color: COLORS.green },
+  ];
+  function renderRow(rowId, kpis) {
+    document.getElementById(rowId).innerHTML = kpis.map(k=>
+      `<div class="card">
+        <div class="card-title">${k.title}</div>
+        <div class="card-value" style="color:${k.color}">${k.value}</div>
+        <div class="card-sub">${k.sub}</div>
+        <div class="card-accent">${k.accent}</div>
+      </div>`).join('');
+  }
+  renderRow('kpi-row', kpis1);
+  renderRow('kpi-row2', kpis2);
+
+  const s = data.sparklines;
+  sparkChart('sparkPV',   s.dates, s.pv,   COLORS.solar, 'PV (kWh)');
+  sparkChart('sparkWind', s.dates, s.wind, COLORS.wind,  'Wind (kWh)');
+  sparkChart('sparkLoad', s.dates, s.load, '#a855f7',    'Load (kWh)');
+});
+
+// ── Seasonal profile ──────────────────────────────────────────────────────────
+fetch('/api/seasonal_profile').then(r=>r.json()).then(data => {
+  const hours = Array.from({length:24}, (_,i)=>i+':00');
+  const palette = { Winter:'#93c5fd', Spring:'#86efac', Summer:'#fde68a', Autumn:'#fdba74' };
+  new Chart(document.getElementById('seasonChart'), {
+    type: 'line',
+    data: {
+      labels: hours,
+      datasets: Object.entries(data).map(([s,vals])=>({
+        label: s, data: vals, borderColor: palette[s],
+        backgroundColor: palette[s]+'18', fill: true,
+        tension: 0.5, borderWidth: 2.5, pointRadius: 0,
+      }))
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { labels: { color:'#8b949e', font:{size:12} } } },
+      scales: {
+        x: { ticks: { color:'#8b949e' }, grid: { color:'#30363d' } },
+        y: { ticks: { color:'#8b949e' }, grid: { color:'#30363d' },
+             title: { display:true, text:'PV Output (kW)', color:'#8b949e' } }
+      }
+    }
+  });
+});
+
+// ── Model metrics ─────────────────────────────────────────────────────────────
+fetch('/api/model_metrics').then(r=>r.json()).then(data => {
+  let wHTML = '';
+  for (const [k,v] of Object.entries(data.weather)) wHTML += metricRow(k, v);
+  document.getElementById('weath-metrics').innerHTML =
+    `<div class="card-title">🌤️ Weather-Based Prediction</div>${wHTML}`;
+
+  const ts = data.timeseries;
+  let tsHTML = '';
+  if (ts.xgb_val && ts.xgb_val.RMSE) tsHTML += metricRow('XGBoost (val)', ts.xgb_val);
+  if (ts.ensemble && ts.ensemble.RMSE) tsHTML += metricRow('Ensemble (test)', ts.ensemble);
+  document.getElementById('ts-metrics').innerHTML =
+    `<div class="card-title">📈 Time-Series Forecasting</div>${tsHTML}`;
+});
+</script>
+{% endblock %}
